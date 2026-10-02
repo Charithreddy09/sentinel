@@ -41,9 +41,9 @@ public final class Blocklist {
             "essex", "sussex", "middlesex", "sexton", "sexsmith", "flaxseed",
             "essexcounty", "sextondiesel",
             // Substring landmines: ordinary words that merely contain a keyword.
-            // Only applied when the word is the FIRST label and the domain has
-            // <=3 labels and no other label trips a keyword — so an adult host
-            // riding on a benign-looking first label still gets blocked.
+            // Applied to ANY label of the domain, but only when every label that
+            // trips a keyword is itself one of these words — so an adult host
+            // riding on a benign-looking label still gets blocked.
             "sextant", "sextants", "sextile", "sextet", "sexagesimal",
             "sexism", "sexist", "sexology", "sexed", "sexing",
             "unisex", "unisexclothing", "unisexnames", "unisexsalon",
@@ -74,12 +74,27 @@ public final class Blocklist {
         String d = domain.toLowerCase();
         if (d.endsWith(".")) d = d.substring(0, d.length() - 1);
         String[] labels = d.split("\\.");
-        // A benign-looking first label only exempts the domain when nothing else
-        // in it looks adult and it isn't deeply nested (adult hosts love to hide
-        // under a legit-looking subdomain). See the WHITELIST comment.
-        if (labels.length > 0 && WHITELIST.contains(labels[0])) {
-            if (labels.length <= 3 && !keywordHit(labels, 1)) return false;
+        // An innocent label exempts the domain only when EVERY label that trips
+        // a keyword is itself an innocent whitelisted word. Checking only
+        // labels[0] was a bug: it missed the common real shape where the
+        // innocent word sits one level down (www.essex.ac.uk, cdn.sextant.com,
+        // forum.bdsmtest.org) -- those were blocked despite being whitelisted.
+        // The adversarial case still holds: bisexual.jerkoffgalleries.com has
+        // an innocent label AND an adult one, so not every trip is innocent and
+        // it stays blocked.
+        boolean anyTrip = false;
+        boolean allTripsInnocent = true;
+        for (String label : labels) {
+            boolean trips = false;
+            for (String kw : KEYWORDS) {
+                if (label.contains(kw)) { trips = true; break; }
+            }
+            if (trips) {
+                anyTrip = true;
+                if (!WHITELIST.contains(label)) allTripsInnocent = false;
+            }
         }
+        if (anyTrip && allTripsInnocent) return false;
         String cur = d;
         while (true) {
             if (domains.contains(cur)) return true;
