@@ -251,6 +251,7 @@ public final class Blocklist {
      */
     public static String safeTarget(String domain) {
         String d = domain.toLowerCase();
+        // Google: any google.<tld>, plus the country variants and www.google.*
         if (d.equals("google.com") || d.equals("www.google.com")
                 || d.startsWith("www.google.") || d.equals("google.co.in")
                 || d.matches("google\\.[a-z.]{2,7}")) {
@@ -259,6 +260,18 @@ public final class Blocklist {
         if (d.equals("bing.com") || d.equals("www.bing.com")) return "strict.bing.com";
         if (d.equals("youtube.com") || d.equals("www.youtube.com") || d.equals("m.youtube.com")) {
             return "restrictmoderate.youtube.com";
+        }
+        // Brave -- explicitly requested, was previously unenforced.
+        if (d.equals("brave.com") || d.equals("www.brave.com")
+                || d.equals("search.brave.com")) return "safe.search.brave.com";
+        // DuckDuckGo
+        if (d.equals("duckduckgo.com") || d.equals("www.duckduckgo.com")
+                || d.equals("html.duckduckgo.com") || d.equals("lite.duckduckgo.com")) {
+            return "safe.duckduckgo.com";
+        }
+        // Startpage
+        if (d.equals("startpage.com") || d.equals("www.startpage.com")) {
+            return "safe.startpage.com";
         }
         return null;
     }
