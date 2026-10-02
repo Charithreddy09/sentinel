@@ -39,7 +39,24 @@ public final class Blocklist {
     // Labels that contain a keyword but are NOT adult — never block these.
     private static final Set<String> WHITELIST = new HashSet<>(Arrays.asList(
             "essex", "sussex", "middlesex", "sexton", "sexsmith", "flaxseed",
-            "essexcounty", "sextondiesel"
+            "essexcounty", "sextondiesel",
+            // Substring landmines: ordinary words that merely contain a keyword.
+            // Only applied when the word is the FIRST label and the domain has
+            // <=3 labels and no other label trips a keyword — so an adult host
+            // riding on a benign-looking first label still gets blocked.
+            "sextant", "sextants", "sextile", "sextet", "sexagesimal",
+            "sexism", "sexist", "sexology", "sexed", "sexing",
+            "unisex", "unisexclothing", "unisexnames", "unisexsalon",
+            "homosexual", "heterosexual", "intersex",
+            "sexual", "sexuality", "sexually", "sexualhealth", "sexeducation",
+            "adulteducation", "adulthood", "adulting",
+            "escorted", "escorting", "escortservice",
+            "nudism", "nudity",
+            "bdsmtest", "bdsmtests",
+            "cam4you",
+            "milford", "militia", "military", "milestone", "mild", "mildew",
+            "milk", "milky", "million", "mildred",
+            "eroticart", "eroticism"
     ));
 
     private final Set<String> domains = new HashSet<>();
@@ -56,9 +73,12 @@ public final class Blocklist {
         if (domain == null || domain.isEmpty()) return false;
         String d = domain.toLowerCase();
         if (d.endsWith(".")) d = d.substring(0, d.length() - 1);
-        // Whitelisted labels are never blocked.
-        for (String label : d.split("\\.")) {
-            if (WHITELIST.contains(label)) return false;
+        String[] labels = d.split("\\.");
+        // A benign-looking first label only exempts the domain when nothing else
+        // in it looks adult and it isn't deeply nested (adult hosts love to hide
+        // under a legit-looking subdomain). See the WHITELIST comment.
+        if (labels.length > 0 && WHITELIST.contains(labels[0])) {
+            if (labels.length <= 3 && !keywordHit(labels, 1)) return false;
         }
         String cur = d;
         while (true) {
@@ -67,9 +87,19 @@ public final class Blocklist {
             if (i < 0) break;
             cur = cur.substring(i + 1);
         }
-        for (String kw : KEYWORDS) {
-            for (String label : d.split("\\.")) {
-                if (label.contains(kw)) return true;
+        return keywordHit(labels, 0);
+    }
+
+    /**
+     * True when any label from {@code from} onwards contains a keyword.
+     * Deliberately a plain substring match: the keyword net is the backstop for
+     * domains missing from the list, so it errs toward catching. False positives
+     * are handled by WHITELIST above, which is the narrow, audited side.
+     */
+    private static boolean keywordHit(String[] labels, int from) {
+        for (int i = from; i < labels.length; i++) {
+            for (String kw : KEYWORDS) {
+                if (labels[i].contains(kw)) return true;
             }
         }
         return false;
