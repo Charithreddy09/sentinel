@@ -83,13 +83,17 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         SharedPreferences p = getSharedPreferences("novaguard", MODE_PRIVATE);
-        boolean on = p.getBoolean("on", false);
+        boolean flag = p.getBoolean("on", false);
         boolean admin = isAdmin();
-        if (on) {
+        // The flag says the service *was* started. This says the tunnel is still
+        // actually there. Trusting the flag alone is how you show a green "ON"
+        // over a dead filter.
+        boolean live = flag && VpnService.prepare(this) == null;
+        if (live) {
             status.setText("Protection: ON 🟢" + (admin ? "\nUninstall: locked 🔒" : "\nUninstall: not locked yet"));
             onBtn.setVisibility(View.GONE);
         } else {
-            status.setText("Protection: OFF 🔴");
+            status.setText(flag ? "Protection: stopped 🔴\nTap to restart" : "Protection: OFF 🔴");
             onBtn.setVisibility(View.VISIBLE);
         }
     }

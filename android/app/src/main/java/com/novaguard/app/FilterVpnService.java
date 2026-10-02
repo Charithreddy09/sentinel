@@ -7,6 +7,8 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -29,6 +31,10 @@ public class FilterVpnService extends VpnService {
     static final String FAKE_DNS = "10.111.222.3";
     private static final String[] REAL_DNS = {"1.1.1.1", "8.8.8.8"};
     private static final String CHANNEL = "novaguard";
+    private static final int ALERT_ID = 2;
+    // Canary for the self-check: a domain the filter must always block. If this
+    // stops matching, the blocklist itself has failed to load.
+    private static final String CANARY = "pornhub.com";
 
     private ParcelFileDescriptor tun;
     private volatile boolean running;
@@ -37,12 +43,17 @@ public class FilterVpnService extends VpnService {
     private final AtomicInteger packetId = new AtomicInteger(1);
     private ExecutorService pool;
     private Blocklist blocklist;
+    private NotificationManager nm;
+    private Handler ui;
+    private Runnable selfCheck;
 
     @Override
     public void onCreate() {
         super.onCreate();
         blocklist = new Blocklist(this);
         pool = Executors.newFixedThreadPool(8);
+        nm = getSystemService(NotificationManager.class);
+        ui = new Handler(Looper.getMainLooper());
     }
 
     @Override
@@ -50,7 +61,61 @@ public class FilterVpnService extends VpnService {
         createChannel();
         startForeground(1, buildNotification());
         startVpn();
+        scheduleSelfCheck();
         return START_STICKY;
+    }
+
+    /**
+     * Periodic self-check: prove the filter is actually catching things, not
+     * merely claiming to be on. Once a minute, run a canary domain through the
+     * exact same isBlocked() path a live query takes. If it stops being blocked,
+     * something upstream of the tunnel broke and the app says so loudly instead
+     * of showing a confident "on".
+     */
+    private void scheduleSelfCheck() {
+        if (selfCheck != null) return;
+        selfCheck = new Runnable() {
+            @Override
+            public void run() {
+                if (!running) return;
+                boolean healthy;
+                try {
+                    healthy = blocklist.isBlocked(CANARY);
+                } catch (Exception e) {
+                    healthy = false;
+                }
+                if (!healthy) {
+                    postAlert();
+                } else {
+                    clearAlert();
+                }
+                ui.postDelayed(this, 60_000);
+            }
+        };
+        ui.postDelayed(selfCheck, 10_000);
+    }
+
+    private void postAlert() {
+        try {
+            Notification n = new Notification.Builder(this, CHANNEL)
+                    .setContentTitle("⚠️ Protection has stopped working")
+                    .setContentText("Tap to fix — your filter is not catching content right now")
+                    .setSmallIcon(android.R.drawable.stat_sys_warning)
+                    .setContentIntent(PendingIntent.getActivity(this, 0,
+                            new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE))
+                    .setAutoCancel(false)
+                    .setOngoing(true)
+                    .build();
+            nm.notify(ALERT_ID, n);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void clearAlert() {
+        try {
+            nm.cancel(ALERT_ID);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -85,6 +150,9 @@ public class FilterVpnService extends VpnService {
             tun = null;
         }
         if (tun == null) {
+            // Establish failed. Do not leave a stale "on" flag behind, or the
+            // screen and BootReceiver would both believe protection is running.
+            prefs().edit().putBoolean("on", false).apply();
             stopSelf();
             return;
         }
@@ -219,8 +287,11 @@ public class FilterVpnService extends VpnService {
 
     private void createChannel() {
         NotificationManager nm = getSystemService(NotificationManager.class);
+        // IMPORTANCE_LOW, not MIN: MIN would silence the "protection stopped"
+        // alert too, and a warning nobody can see is the same as no warning.
+        // LOW keeps the ongoing notice quiet (no sound, no heads-up).
         NotificationChannel ch = new NotificationChannel(CHANNEL, "NovaGuard protection",
-                NotificationManager.IMPORTANCE_MIN);
+                NotificationManager.IMPORTANCE_LOW);
         ch.setDescription("Shows that the content filter is active");
         nm.createNotificationChannel(ch);
     }
